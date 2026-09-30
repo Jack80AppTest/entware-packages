@@ -1,0 +1,94 @@
+name: Build transmission-old 4.1.x ARMv7 test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - transmission-old-4.1.3
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout package repository
+        uses: actions/checkout@v6
+
+      - name: Checkout Entware buildroot
+        uses: actions/checkout@v6
+        with:
+          repository: Entware/Entware
+          ref: 969c703e6fd8b2ad84d82affaeb14b48d1fcb105
+          path: entware
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex gawk gcc-multilib gettext git \
+            libncurses5-dev libssl-dev python2 python-is-python3 \
+            python3-distutils subversion unzip zlib1g-dev rsync
+
+      - name: Prepare GCC 14 target configuration
+        working-directory: entware
+        run: |
+          cp configs/armv7-3.2.config .config
+          sed -i 's/^CONFIG_GCC_USE_VERSION_8=y$/# CONFIG_GCC_USE_VERSION_8 is not set/' .config
+          sed -i 's/^# CONFIG_GCC_USE_VERSION_14 is not set$/CONFIG_GCC_USE_VERSION_14=y/' .config
+          sh "$GITHUB_WORKSPACE/transmission-old/build/prepare-entware-gcc14.sh" .
+          make defconfig
+          grep -E 'CONFIG_GCC_USE_VERSION_(8|14)|CONFIG_GCC_VERSION=|CONFIG_GLIBC_VERSION=|CONFIG_TARGET_ARCH_PACKAGES=' .config
+
+      - name: Build tools and GCC 14 toolchain
+        working-directory: entware
+        run: |
+          make tools/install -j$(nproc)
+          make toolchain/install -j$(nproc)
+          make target/compile -j$(nproc)
+
+      - name: Add this repository as a feed
+        working-directory: entware
+        run: |
+          echo "src-git jacklul https://github.com/${GITHUB_REPOSITORY}.git;${GITHUB_REF_NAME}" >> feeds.conf
+          make package/symlinks
+          grep -R "PKG_VERSION:=4.1.3" -n package/feeds/jacklul/transmission-old/Makefile
+
+      - name: Build transmission-old
+        working-directory: entware
+        run: |
+          echo 'CONFIG_PACKAGE_transmission-old=m' >> .config
+          make defconfig
+          make package/feeds/jacklul/transmission-old/compile -j1 V=sc
+
+      - name: Collect package
+        run: |
+          mkdir -p artifacts
+          cp -v entware/bin/targets/*/*/packages/transmission-old_4.1.3-*.ipk artifacts/
+
+      - name: Static package sanity check
+        run: |
+          set -eu
+          ipk="$(find artifacts -name 'transmission-old_4.1.3-*.ipk' -print -quit)"
+          test -n "$ipk"
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          ar x "$GITHUB_WORKSPACE/$ipk"
+          tar -xf control.tar.gz
+          tar -xf data.tar.gz
+          echo '--- control ---'
+          cat control
+          grep -q 'Architecture: armv7-3.2' control
+          grep -q '^/opt/etc/transmission/settings.json$' conffiles
+          test -e opt/lib/transmission-4.1/libstdc++.so.6
+          test -e opt/lib/transmission-4.1/libgcc_s.so.1
+          test -e opt/lib/transmission-4.1/libatomic.so.1
+          readelf -d opt/bin/transmission-daemon | grep '/opt/lib/transmission-4.1'
+          file opt/bin/transmission-daemon | grep -q 'ELF 32-bit.*ARM'
+          readelf -l opt/bin/transmission-daemon | grep -q '/opt/lib/ld-linux.so.3'
+
+      - name: Upload ARMv7 IPK
+        uses: actions/upload-artifact@v7
+        with:
+          name: transmission-old-4.1.3-armv7sf-k3.2
+          path: artifacts/*.ipk
