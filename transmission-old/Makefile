@@ -1,14 +1,16 @@
 include $(TOPDIR)/rules.mk
 
-# https://github.com/Entware/entware-packages/blob/master/net/transmission/Makefile
+# Based on the Transmission 4.1.3 + GCC 14 private-runtime proof of concept
+# discussed in Entware/Entware#1224. This package intentionally keeps the
+# historical "transmission-old" single-package layout used by this repository.
 
 PKG_NAME:=transmission-old
-PKG_VERSION:=4.0.5
+PKG_VERSION:=4.1.3
 PKG_RELEASE:=1
 
 PKG_SOURCE:=transmission-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://github.com/transmission/transmission/releases/download/$(PKG_VERSION)/
-PKG_HASH:=fd68ff114a479200043c30c7e69dba4c1932f7af36ca4c5b5d2edcb5866e6357
+PKG_HASH:=ce7d2d8b101f7eb54bc3cf0bc55f52f7ebd4a25fa48e00bdca9a7e0fc02617da
 
 PKG_MAINTAINER:=Daniel Golle <daniel@makrotopia.org>
 PKG_LICENSE:=GPL-2.0-or-later
@@ -50,6 +52,10 @@ define Package/transmission-old/description
  Transmission is a simple BitTorrent client.
  It features a very simple, intuitive interface
  on top on an efficient, cross-platform back-end.
+
+ Transmission 4.1.x requires C++20. The GCC 14 runtime needed by this package
+ is bundled privately under /opt/lib/transmission-4.1 and does not replace
+ Entware's global libstdc++, libgcc_s or libatomic.
 endef
 
 define Package/transmission-old/conffiles
@@ -57,6 +63,8 @@ define Package/transmission-old/conffiles
 endef
 
 TARGET_CXXFLAGS += -DHAVE_SIZE_T
+comma:=,
+TARGET_LDFLAGS := $(subst -Wl$(comma)-rpath=/opt/lib,-Wl$(comma)-rpath=/opt/lib/transmission-4.1,$(TARGET_LDFLAGS))
 TARGET_LDFLAGS += -latomic -Wl,--as-needed
 
 CMAKE_OPTIONS += \
@@ -112,6 +120,15 @@ define Package/transmission-old/install
 
 	$(INSTALL_DIR) $(1)/opt/share/transmission
 	$(CP) $(PKG_INSTALL_DIR)/opt/share/transmission/public_html $(1)/opt/share/transmission/
+
+	# Transmission 4.1.x requires a newer C++ runtime than the normal Entware
+	# GCC 8 runtime. Keep the newer runtime private to Transmission so an
+	# installation never replaces Entware's global GCC runtime libraries.
+	$(INSTALL_DIR) $(1)/opt/lib/transmission-4.1
+	$(CP) $(TOOLCHAIN_DIR)/lib/libstdc++.so.6* $(1)/opt/lib/transmission-4.1/
+	$(RM) $(1)/opt/lib/transmission-4.1/*-gdb.py
+	$(CP) $(TOOLCHAIN_DIR)/lib/libgcc_s.so.1 $(1)/opt/lib/transmission-4.1/
+	$(CP) $(TOOLCHAIN_DIR)/lib/libatomic.so.1* $(1)/opt/lib/transmission-4.1/
 endef
 
 $(eval $(call BuildPackage,transmission-old))
