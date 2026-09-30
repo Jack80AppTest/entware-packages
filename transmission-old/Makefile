@@ -64,7 +64,7 @@ endef
 
 TARGET_CXXFLAGS += -DHAVE_SIZE_T
 comma:=,
-TARGET_LDFLAGS := $(subst -Wl$(comma)-rpath=/opt/lib,-Wl$(comma)-rpath=/opt/lib/transmission-4.1,$(TARGET_LDFLAGS))
+TARGET_LDFLAGS := $(subst -Wl$(comma)-rpath=/opt/lib,-Wl$(comma)-rpath=/opt/lib/transmission-4.1:/opt/lib,$(TARGET_LDFLAGS))
 TARGET_LDFLAGS += -latomic -Wl,--as-needed
 
 CMAKE_OPTIONS += \

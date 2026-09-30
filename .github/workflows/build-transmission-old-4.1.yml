@@ -73,9 +73,9 @@ jobs:
           test -n "$ipk"
           tmp="$(mktemp -d)"
           cd "$tmp"
-          ar x "$GITHUB_WORKSPACE/$ipk"
-          tar -xf control.tar.gz
-          tar -xf data.tar.gz
+          gzip -dc "$GITHUB_WORKSPACE/$ipk" | tar -xf -
+          tar -xzf control.tar.gz
+          tar -xzf data.tar.gz
           echo '--- control ---'
           cat control
           grep -q 'Architecture: armv7-3.2' control
@@ -83,7 +83,7 @@ jobs:
           test -e opt/lib/transmission-4.1/libstdc++.so.6
           test -e opt/lib/transmission-4.1/libgcc_s.so.1
           test -e opt/lib/transmission-4.1/libatomic.so.1
-          readelf -d opt/bin/transmission-daemon | grep '/opt/lib/transmission-4.1'
+          readelf -d opt/bin/transmission-daemon | grep -q '/opt/lib/transmission-4.1:/opt/lib'
           file opt/bin/transmission-daemon | grep -q 'ELF 32-bit.*ARM'
           readelf -l opt/bin/transmission-daemon | grep -q '/opt/lib/ld-linux.so.3'
 
