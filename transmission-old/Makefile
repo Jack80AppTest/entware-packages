@@ -39,7 +39,7 @@ define Package/transmission-old
   CATEGORY:=Network
   TITLE:=BitTorrent client
   URL:=https://www.transmissionbt.com
-  DEPENDS:=+libatomic +libcurl +libdeflate +libevent2 \
+  DEPENDS:=+libcurl +libdeflate +libevent2 \
 	   +libevent2-pthreads +libminiupnpc +libnatpmp +libpthread +libpsl \
 	   +librt +libutp +zlib +LIBCURL_NOSSL:libmbedtls \
 	   +LIBCURL_GNUTLS:libmbedtls +LIBCURL_MBEDTLS:libmbedtls
@@ -64,7 +64,7 @@ endef
 
 TARGET_CXXFLAGS += -DHAVE_SIZE_T
 comma:=,
-TARGET_LDFLAGS := $(subst -Wl$(comma)-rpath=/opt/lib,-Wl$(comma)-rpath=/opt/lib/transmission-4.1:/opt/lib,$(TARGET_LDFLAGS))
+TARGET_LDFLAGS := $(subst -Wl$(comma)-rpath=/opt/lib,-Wl$(comma)-rpath=/opt/lib/transmission-4.1,$(TARGET_LDFLAGS))
 TARGET_LDFLAGS += -latomic -Wl,--as-needed
 
 CMAKE_OPTIONS += \
