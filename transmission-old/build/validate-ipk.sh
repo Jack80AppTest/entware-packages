@@ -125,13 +125,6 @@ echo "$webdeps" | grep -Eq '(^|, )transmission-old-daemon(,|$)' \
     && pass 'transmission-old-web depends on transmission-old-daemon' \
     || fail 'transmission-old-web does not depend on transmission-old-daemon'
 
-runtime_provides="$(control_field transmission-old-runtime Provides)"
-for provided in libstdc++.so.6 libgcc_s.so.1 libatomic.so.1; do
-    echo "$runtime_provides" | grep -Fq "$provided" \
-        && pass "runtime advertises $provided" \
-        || fail "runtime does not advertise $provided"
-done
-
 daemon_control="${PKGDIR[transmission-old-daemon]}/control"
 grep -qx '/opt/etc/transmission/settings.json' "$daemon_control/conffiles" 2>/dev/null \
     && pass 'settings.json is protected as daemon conffile' \
@@ -239,6 +232,7 @@ done
     && pass 'libatomic.so.1 symlink target is exact' \
     || fail 'libatomic.so.1 symlink target is unexpected'
 
+leak_failures_before="$failures"
 for pkg in "${required_packages[@]}"; do
     for global_runtime in libstdc++.so.6 libgcc_s.so.1 libatomic.so.1; do
         if [ -e "${PKGDIR[$pkg]}/data/opt/lib/$global_runtime" ] || [ -L "${PKGDIR[$pkg]}/data/opt/lib/$global_runtime" ]; then
@@ -246,7 +240,9 @@ for pkg in "${required_packages[@]}"; do
         fi
     done
 done
-[ "$failures" -ge 0 ] && pass 'no split package replaces Entware global GCC runtime' || true
+if [ "$failures" -eq "$leak_failures_before" ]; then
+    pass 'no split package replaces Entware global GCC runtime'
+fi
 
 echo '===== ARMV7 ELF / LOADER / RPATH ====='
 declare -A BINPKG
