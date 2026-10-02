@@ -1,10 +1,10 @@
-name: Build transmission-old 4.1.x ARMv7 test
+name: Build transmission-old 4.1.x split ARMv7
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - transmission-old-4.1.3
+      - transmission-old-4.1.3-split
 
 jobs:
   build:
@@ -70,36 +70,57 @@ jobs:
             entware/staging_dir
           key: transmission-armv7-gcc14-entware-969c703e-v1
 
-      - name: Add this repository as a feed
+      - name: Add split package repository as feed
         working-directory: entware
         run: |
           echo "src-git jacklul https://github.com/${GITHUB_REPOSITORY}.git;${GITHUB_REF_NAME}" >> feeds.conf
           make package/symlinks
           grep -R "PKG_VERSION:=4.1.3" -n package/feeds/jacklul/transmission-old/Makefile
 
-      - name: Build transmission-old
+      - name: Select all five split packages
         working-directory: entware
         run: |
-          echo 'CONFIG_PACKAGE_transmission-old=m' >> .config
+          for pkg in runtime daemon cli remote web; do
+            echo "CONFIG_PACKAGE_transmission-old-${pkg}=m" >> .config
+          done
           make defconfig
+          grep -E '^CONFIG_PACKAGE_transmission-old-(runtime|daemon|cli|remote|web)=m$' .config
+
+      - name: Build split transmission-old packages
+        working-directory: entware
+        run: |
+          make package/feeds/jacklul/transmission-old/clean
           make package/feeds/jacklul/transmission-old/compile -j1 V=sc
 
-      - name: Collect package
+      - name: Collect exactly five IPKs
         run: |
           set -euo pipefail
+          shopt -s nullglob
           mkdir -p artifacts
-          cp -v entware/bin/targets/*/*/packages/transmission-old_4.1.3-*.ipk artifacts/
+          packages=(runtime daemon cli remote web)
+          for pkg in "${packages[@]}"; do
+            matches=(entware/bin/targets/*/*/packages/transmission-old-${pkg}_4.1.3-*.ipk)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one IPK for transmission-old-${pkg}, found ${#matches[@]}" >&2
+              printf '%s\n' "${matches[@]}" >&2
+              exit 1
+            fi
+            cp -v "${matches[0]}" artifacts/
+          done
+          count="$(find artifacts -maxdepth 1 -type f -name 'transmission-old-*_4.1.3-*.ipk' | wc -l)"
+          [ "$count" -eq 5 ]
           sha256sum artifacts/*.ipk
 
-      - name: Upload ARMv7 IPK before validation
-        uses: actions/upload-artifact@v7
-        with:
-          name: transmission-old-4.1.3-armv7sf-k3.2
-          path: artifacts/*.ipk
-
-      - name: Exhaustive static package validation
+      - name: Exhaustive five-package validation
         run: |
           set -euo pipefail
-          ipk="$(find artifacts -name 'transmission-old_4.1.3-*.ipk' -print -quit)"
-          test -n "$ipk"
-          bash transmission-old/build/validate-ipk.sh "$ipk"
+          bash transmission-old/build/validate-ipk.sh artifacts | tee artifacts/validation-report.txt
+
+      - name: Upload ARMv7 split IPKs and validation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: transmission-old-4.1.3-split-armv7sf-k3.2
+          path: |
+            artifacts/*.ipk
+            artifacts/validation-report.txt
