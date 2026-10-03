@@ -1,0 +1,9 @@
+Rollback source snapshot for transmission-old 4.0.5-1
+
+Upstream repository: jacklul/entware-packages
+Snapshot: commit immediately before "Remove transmission-old"
+Parent commit: 069ebcf77980158ff5cc2d9465273994cea03778
+Removal commit: acbdf7eb003f86ba47359064783c1f12b7607312
+
+The transmission-old directory on this branch is intended to preserve the
+pre-removal Jack'lul 4.0.5-1 package source for ARMv7 rollback builds.
