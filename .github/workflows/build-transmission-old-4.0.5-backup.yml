@@ -1,0 +1,139 @@
+name: Build transmission-old 4.0.5 rollback ARMv7
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - transmission-old-4.0.5-backup
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout rollback source
+        uses: actions/checkout@v6
+
+      - name: Checkout pinned Entware buildroot
+        uses: actions/checkout@v6
+        with:
+          repository: Entware/Entware
+          ref: 969c703e6fd8b2ad84d82affaeb14b48d1fcb105
+          path: entware
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex gawk gcc-multilib gettext git \
+            libncurses5-dev libssl-dev python2 python-is-python3 \
+            python3-distutils subversion unzip zlib1g-dev rsync
+
+      - name: Prepare ARMv7 Entware configuration
+        working-directory: entware
+        run: |
+          cp configs/armv7-3.2.config .config
+          make defconfig
+          grep -E 'CONFIG_GCC_USE_VERSION_|CONFIG_GCC_VERSION=|CONFIG_GLIBC_VERSION=|CONFIG_TARGET_ARCH_PACKAGES=' .config
+
+      - name: Restore Entware ARMv7 build cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            entware/bin
+            entware/build_dir
+            entware/staging_dir
+          key: transmission-old-4.0.5-armv7-entware-969c703e-v1
+
+      - name: Build tools and target
+        working-directory: entware
+        run: |
+          make tools/install -j$(nproc)
+          make toolchain/install -j$(nproc)
+          make target/compile -j$(nproc)
+
+      - name: Save Entware ARMv7 build cache
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            entware/bin
+            entware/build_dir
+            entware/staging_dir
+          key: transmission-old-4.0.5-armv7-entware-969c703e-v1
+
+      - name: Add rollback repository as feed
+        working-directory: entware
+        run: |
+          echo "src-git rollback https://github.com/${GITHUB_REPOSITORY}.git;${GITHUB_REF_NAME}" >> feeds.conf
+          make package/symlinks
+          grep -R "PKG_VERSION:=4.0.5" -n package/feeds/rollback/transmission-old/Makefile
+          grep -R "PKG_RELEASE:=1" -n package/feeds/rollback/transmission-old/Makefile
+
+      - name: Build transmission-old 4.0.5-1
+        working-directory: entware
+        run: |
+          echo 'CONFIG_PACKAGE_transmission-old=m' >> .config
+          make defconfig
+          make package/feeds/rollback/transmission-old/clean
+          make package/feeds/rollback/transmission-old/compile -j1 V=sc
+
+      - name: Collect rollback IPK
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          shopt -s nullglob
+          matches=(entware/bin/targets/*/*/packages/transmission-old_4.0.5-1_armv7-3.2.ipk)
+          if [ "${#matches[@]}" -ne 1 ]; then
+            echo "Expected exactly one transmission-old_4.0.5-1_armv7-3.2.ipk, found ${#matches[@]}" >&2
+            find entware/bin/targets -type f -name 'transmission-old*.ipk' -print >&2 || true
+            exit 1
+          fi
+          cp -v "${matches[0]}" artifacts/
+          sha256sum artifacts/*.ipk | tee artifacts/SHA256SUMS
+
+      - name: Validate rollback IPK
+        run: |
+          set -euo pipefail
+          ipk="$(find artifacts -name 'transmission-old_4.0.5-1_armv7-3.2.ipk' -print -quit)"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          gzip -dc "$ipk" | tar -xf - -C "$tmp"
+          mkdir -p "$tmp/control" "$tmp/data"
+          tar -xzf "$tmp/control.tar.gz" -C "$tmp/control"
+          tar -xzf "$tmp/data.tar.gz" -C "$tmp/data"
+
+          cat "$tmp/control/control" | tee artifacts/control.txt
+          cp "$tmp/control/conffiles" artifacts/conffiles.txt
+
+          grep -qx 'Package: transmission-old' "$tmp/control/control"
+          grep -qx 'Version: 4.0.5-1' "$tmp/control/control"
+          grep -qx 'Architecture: armv7-3.2' "$tmp/control/control"
+          grep -qx '/opt/etc/transmission/settings.json' "$tmp/control/conffiles"
+
+          for name in transmission-daemon transmission-remote transmission-cli transmission-create transmission-edit transmission-show; do
+            test -x "$tmp/data/opt/bin/$name"
+            file "$tmp/data/opt/bin/$name" | grep -q 'ELF 32-bit.*ARM'
+            readelf -h "$tmp/data/opt/bin/$name" | grep -q 'soft-float ABI'
+            readelf -l "$tmp/data/opt/bin/$name" | grep -q '/opt/lib/ld-linux.so.3'
+          done
+
+          grep -q 'ARGS="-g /opt/etc/transmission"' "$tmp/data/opt/etc/init.d/S88transmission"
+          grep -q 'TRANSMISSION_WEB_HOME="/opt/share/transmission/public_html"' "$tmp/data/opt/etc/init.d/S88transmission"
+          test -f "$tmp/data/opt/etc/transmission/settings.json"
+          test -f "$tmp/data/opt/share/transmission/public_html/index.html"
+
+          top="$(find "$tmp/data" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort -u)"
+          test "$top" = "opt"
+
+          echo 'ROLLBACK VALIDATION PASSED' | tee artifacts/validation-report.txt
+
+      - name: Upload rollback package
+        uses: actions/upload-artifact@v7
+        with:
+          name: transmission-old-4.0.5-1-armv7sf-k3.2-rollback
+          path: |
+            artifacts/transmission-old_4.0.5-1_armv7-3.2.ipk
+            artifacts/SHA256SUMS
+            artifacts/control.txt
+            artifacts/conffiles.txt
+            artifacts/validation-report.txt
